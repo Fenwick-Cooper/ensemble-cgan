@@ -63,7 +63,7 @@ def get_dates(year,
     assert end_hour <= 168
     assert start_hour % HOURS == 0
     assert end_hour % HOURS == 0
-    assert end_hour > start_hour
+    assert end_hour >= start_hour
 
     # Build "cache" of truth data dates/times that exist
     truth_cache = set()
@@ -115,12 +115,12 @@ def load_truth_and_mask(date,
     '''
     # convert date and time_idx to get the correct truth file
     fcst_date = datetime.datetime.strptime(date, "%Y%m%d")
-    valid_dt = fcst_date + datetime.timedelta(hours=int(time_idx)*HOURS)  # needs to change for 12Z forecasts
+    valid_dt = fcst_date + datetime.timedelta(hours=int(5)*HOURS)  # All forecasts start at 06:00 the next day
     fname = valid_dt.strftime('%Y%m%d_%H')
-    data_path = os.path.join(TRUTH_PATH, f"{fname}.nc4")
+    data_path = os.path.join(TRUTH_PATH, f"{fname}.nc")
 
     ds = xr.open_dataset(data_path)
-    da = ds["precipitationCal"]
+    da = ds["precipitation"]
     y = da.values
     ds.close()
 
@@ -193,6 +193,8 @@ def load_fcst(field,
         - accumulated field: mean and stdev of increment over the interval, and the last two channels are all 0
     '''
 
+    # print(f"Loading forecast {field} on {date}")
+
     yearstr = date[:4]
     year = int(yearstr)
     ds_path = os.path.join(FCST_PATH, yearstr, f"{field}.nc")
@@ -210,19 +212,16 @@ def load_fcst(field,
     if field in accumulated_fields:
         # return mean, sd, 0, 0.  zero fields are so that each field returns a 4 x ny x nx array.
         # accumulated fields have been pre-processed s.t. data[:, j, :, :] has accumulation between times j and j+1
-        data1 = all_data_mean[fcst_idx, time_idx, :, :]
-        data2 = all_data_sd[fcst_idx, time_idx, :, :]
-        data3 = np.zeros(data1.shape)
-        data = np.stack([data1, data2, data3, data3], axis=-1)
+        data1 = np.mean(all_data_mean[fcst_idx, 5:9, :, :], axis=0)            # Mean of the accumulations
+        data2 = np.sqrt(np.mean(all_data_sd[fcst_idx, 5:9, :, :]**2, axis=0))  # RMS of the standard deviations
+        data = np.stack([data1, data2], axis=-1)
     else:
-        # return mean_start, sd_start, mean_end, sd_end
-        temp_data_mean = all_data_mean[fcst_idx, time_idx:time_idx+2, :, :]
-        temp_data_sd = all_data_sd[fcst_idx, time_idx:time_idx+2, :, :]
-        data1 = temp_data_mean[0, :, :]
-        data2 = temp_data_sd[0, :, :]
-        data3 = temp_data_mean[1, :, :]
-        data4 = temp_data_sd[1, :, :]
-        data = np.stack([data1, data2, data3, data4], axis=-1)
+        # return mean and std computed using the trapezium rule
+        temp_data_mean = all_data_mean[fcst_idx, 5:10, :, :]
+        temp_data_var = all_data_sd[fcst_idx, 5:10, :, :]**2  # Convert to variances
+        data1 = (temp_data_mean[0, :, :]/2 + np.sum(temp_data_mean[1:4,:,:], axis=0) + temp_data_mean[4,:,:]/2)/4
+        data2 = (temp_data_var[0, :, :]/2 + np.sum(temp_data_var[1:4,:,:], axis=0) + temp_data_var[4,:,:]/2)/4
+        data = np.stack([data1, np.sqrt(data2)], axis=-1)
 
     nc_file.close()
 
@@ -250,7 +249,6 @@ def load_fcst(field,
         elif field in ["sp", "t2m"]:
             # these are bounded well away from zero, so subtract mean from ens mean (but NOT from ens sd!)
             data[:, :, 0] -= fcst_norm[field]["mean"]
-            data[:, :, 2] -= fcst_norm[field]["mean"]
             return data/fcst_norm[field]["std"]
         elif field in nonnegative_fields:
             return data/fcst_norm[field]["max"]
@@ -285,7 +283,7 @@ def get_fcst_stats_slow(field, year=2018):
     These are done via the data loading routines, which is
     slightly inefficient.
     '''
-    dates = get_dates(year, start_hour=0, end_hour=168)
+    dates = get_dates(year, start_hour=6, end_hour=6)
 
     mi = 0.0
     mx = 0.0

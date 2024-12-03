@@ -13,8 +13,8 @@ data_paths = read_config.get_data_paths()
 records_folder = data_paths["TFRecords"]["tfrecords_path"]
 ds_fac = read_config.read_downscaling_factor()["downscaling_factor"]
 
-CLASSES = 4
-DEFAULT_FCST_SHAPE = (128, 128, 4*len(all_fcst_fields))
+CLASSES = 4  # This is the number of training_weights (see config.yaml)
+DEFAULT_FCST_SHAPE = (128, 128, 2*len(all_fcst_fields))
 DEFAULT_CON_SHAPE = (128, 128, 2)
 DEFAULT_OUT_SHAPE = (128, 128, 1)
 
@@ -181,10 +181,13 @@ def write_data(year,
     print("Samples per image:", nsamples)  # note, actual samples may be less than this if mask is used to exclude some
 
     # split TFRecords by lead time, in case this is useful for training on subsets of lead time
-    for time_idx in range(28):
+    #for time_idx in range(28):
+    # For 24h forecasts only use 1 lead time
+    for time_idx in range(1,2):
         print(f"Doing time index {time_idx}")
         s_hour = time_idx*HOURS
-        e_hour = (time_idx + 1)*HOURS
+        #e_hour = (time_idx + 1)*HOURS
+        e_hour = s_hour  # Doesn't make sense when we have only one forecast valid time
         dates = get_dates(year,
                           start_hour=s_hour,
                           end_hour=e_hour)
